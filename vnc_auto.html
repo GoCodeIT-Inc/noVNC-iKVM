@@ -96,9 +96,18 @@
                     rfb.setDesktopSize(innerW, innerH - controlbarH - padding);
             }
         }
+        function doFBUComplete(rfb,fbu){
+            if(rfb._FBU.width === 64896 && rfb._FBU.height === 65056){ // end frame, reinit connection after 100ms
+
+                //debugger;
+            }
+        }
         function FBUComplete(rfb, fbu) {
             UIresize();
-            rfb.set_onFBUComplete(function() { });
+            doFBUComplete(rfb,fbu)
+            rfb.set_onFBUComplete(function() { 
+                doFBUComplete(rfb,fbu)
+            });
         }
         function passwordRequired(rfb) {
             var msg;
@@ -204,7 +213,7 @@
             }
 
             password = WebUtil.getConfigVar('password', '');
-            path = WebUtil.getConfigVar('path', 'websockify');
+            path = WebUtil.getConfigVar('path', '');
 
             // If a token variable is passed in, set the parameter in a cookie.
             // This is used by nova-novncproxy.
@@ -236,6 +245,7 @@
                                'onUpdateState':  updateState,
                                'onXvpInit':    xvpInit,
                                'onPasswordRequired':  passwordRequired,
+
                                'onFBUComplete': FBUComplete});
             } catch (exc) {
                 updateState(null, 'fatal', null, 'Unable to create RFB client -- ' + exc);

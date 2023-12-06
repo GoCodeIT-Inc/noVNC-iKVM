@@ -1352,8 +1352,9 @@ var RFB;
         _framebufferUpdate: function () {
             var ret = true;
             var now;
+            if(this.reconnect_after_resize==undefined)this.reconnect_after_resize=false;
 
-            if (this._FBU.rects === 0) {
+            if (this._FBU.rects === 0 || this.reconnect_after_resize) {
                 if (this._sock.rQwait("FBU header", 3, 1)) { return false; }
                 this._sock.rQskip8();  // Padding
                 this._FBU.rects = this._sock.rQshift16();
@@ -1364,6 +1365,7 @@ var RFB;
                     Util.Info("First FBU latency: " + (now - this._timing.fbu_rt_start));
                 }
             }
+
 
             while (this._FBU.rects > 0) {
                 if (this._rfb_state !== "normal") { return false; }
@@ -1380,6 +1382,17 @@ var RFB;
                     this._FBU.height   = (hdr[6] << 8) + hdr[7];
                     this._FBU.encoding = parseInt((hdr[8] << 24) + (hdr[9] << 16) +
                                                   (hdr[10] << 8) + hdr[11], 10);
+
+                    if(this.reconnect_after_resize && this._FBU.width === 64896 && this._FBU.height === 65056){
+                        this._FBU.rects=0
+                        this._sock.rQwait("alen", 8)
+                        this._sock.rQshiftBytes(8);
+                        setTimeout(()=>{
+                            RFB.messages.fbUpdateRequest(this._sock,0,0,0,64896,65056)
+                        },100)
+                        // debugger;
+                        return false;
+                    }
 
                     this._onFBUReceive(this,
                         {'x': this._FBU.x, 'y': this._FBU.y,
@@ -1414,6 +1427,7 @@ var RFB;
                     ret = this._encHandlers[this._FBU.encoding]();
                 }
                  */
+
                 ret = handler();
 
                 now = (new Date()).getTime();
@@ -1449,7 +1463,6 @@ var RFB;
                         this._timing.fbu_rt_start = 0;
                     }
                 }
-
                 if (!ret) { return ret; }  // need more data
             }
 
@@ -1458,7 +1471,7 @@ var RFB;
                      'width': this._FBU.width, 'height': this._FBU.height,
                      'encoding': this._FBU.encoding,
                      'encodingName': this._encNames[this._FBU.encoding]});
-
+            
             return true;  // We finished this FBU
         },
 
@@ -2525,20 +2538,26 @@ var RFB;
         },
 
         ATEN_HERMON: function () {
-            if (this._FBU.aten_len === -1) {
+            if (this._FBU.aten_len === -1 || this.reconnect_after_resize) {
                 this._FBU.bytes = 8;
                 if (this._sock.rQwait("ATEN_HERMON", this._FBU.bytes)) { return false; }
                 this._FBU.bytes = 0;
                 this._sock.rQskipBytes(4); // @KK: This is the "mysteryFlag".
                 this._FBU.aten_len = this._sock.rQshift32();
+                if(this._FBU.aten_len>0 && this.reconnect_after_resize){
+                    this.reconnect_after_resize=false;
+                }
 
                 if (this._FBU.width === 64896 && this._FBU.height === 65056) {
-                    Util.Info("ATEN iKVM screen is probably off");
+                    Util.Warn("ATEN iKVM screen is probably off");
                     if (this._FBU.aten_len !== 10 && this._FBU.aten_len !== 0) {
                         Util.Debug(">> ATEN iKVM screen off (aten_len="+this._FBU.aten_len+")");
                         this._fail('expected aten_len to be 10 when screen is off');
                     }
                     this._FBU.aten_len = 0;
+                    this._FBU.rects=0
+                    this.reconnect_after_resize=true
+                    RFB.messages.fbUpdateRequest(this._sock,0,0,0,64896,65056)
                     return true;
                 }
                 if (this._fb_width !== this._FBU.width && this._fb_height !== this._FBU.height) {
@@ -2559,7 +2578,8 @@ var RFB;
                 this._sock.rQskip8();
 
                 this._sock.rQskipBytes(4); // number of subrects
-                if (this._FBU.aten_len !== this._sock.rQshift32()) {
+                var supposed_atenLen=this._sock.rQshift32()
+                if (this._FBU.aten_len !== supposed_atenLen) {
                     return this._fail('ATEN_HERMON RAW len mis-match');
                 }
                 this._FBU.aten_len -= 10;
